@@ -1,18 +1,20 @@
-#include <chrono>
-#include <thread>
+#include <cstdint>
 
-#include "esp_log.h"
+#include <iostream>
 
-void setup();
-void loop();
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
-extern "C" void app_main() {}
-
-void setup() { ESP_LOGV("TEST", "Hello from ESP"); }
-
+void setup() {}
 void loop() {
-  using namespace std::chrono_literals;
+  static std::uint64_t i{};
+  std::cout << "Hello: " << i++ << '\n';
+}
 
-  ESP_LOGV("TEST", "HELLO!");
-  std::this_thread.sleep_for(100ms);
+extern "C" void app_main() {
+  setup();
+
+  while (1) {
+    loop();
+  }
 }
