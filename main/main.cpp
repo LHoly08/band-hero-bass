@@ -1,15 +1,8 @@
-#include <cstdint>
 
-#include <iostream>
-
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 
 void setup() {}
-void loop() {
-  static std::uint64_t i{};
-  std::cout << "Hello: " << i++ << '\n';
-}
+
+void loop() {}
 
 extern "C" void app_main() {
   setup();
