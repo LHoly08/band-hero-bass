@@ -1,13 +1,35 @@
+#include <chrono>
+#include <thread>
 
+#include "States.hpp"
+#include "esp_log.h"
 
-void setup() {}
+#include "driver/gpio.h"
 
-void loop() {}
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 extern "C" void app_main() {
-  setup();
+  volatile bh::State state{bh::State::Config};
 
-  while (1) {
-    loop();
+  vTaskDelay(pdMS_TO_TICKS(1000));
+
+infinite_loop:
+
+  switch (state) {
+  case bh::State::Config: {
+    break;
   }
+  case bh::State::PlayingHub: {
+    break;
+  }
+  case bh::State::PlayingSerial: {
+    break;
+  }
+  case bh::State::PlayingBluetooth: {
+    break;
+  }
+  }
+
+  goto infinite_loop;
 }
