@@ -26,9 +26,6 @@ infinite_loop:
   case bh::State::PlayingSerial: {
     break;
   }
-  case bh::State::PlayingBluetooth: {
-    break;
-  }
   }
 
   goto infinite_loop;

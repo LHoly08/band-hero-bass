@@ -6,11 +6,10 @@
 
 #include "States.hpp"
 #include "Strings.hpp"
-#include "esp_bt_defs.h"
-#include "esp_bt_device.h"
-#include "esp_bt_main.h"
 #include "esp_now.h"
 #include "esp_wifi.h"
+#include "freertos/idf_additions.h"
+#include "freertos/task.h"
 #include "nvs_flash.h"
 
 #include "driver/gpio.h"
@@ -24,7 +23,6 @@ static constexpr std::uint8_t peerAddress[6] = {0x00, 0x11, 0x22,
 enum class Type : std::uint8_t {
   Hub = 0,
   Serial,
-  Bluetooth,
 };
 
 template <Type T> struct NeededState;
@@ -35,10 +33,6 @@ template <> struct NeededState<Type::Hub> {
 
 template <> struct NeededState<Type::Serial> {
   static constexpr State state = State::PlayingSerial;
-};
-
-template <> struct NeededState<Type::Bluetooth> {
-  static constexpr State state = State::PlayingBluetooth;
 };
 
 template <Type T> class Play {
@@ -73,7 +67,6 @@ template <Type T> Play<T>::Play(State &state) noexcept : m_state(state) {
     esp_wifi_start();
 
     esp_now_init();
-  } else if constexpr (T == Type::Bluetooth) {
   }
 }
 
@@ -85,14 +78,6 @@ template <Type T> Play<T>::~Play() noexcept {
 
     esp_wifi_stop();
     esp_wifi_deinit();
-
-  } else if constexpr (T == Type::Bluetooth) {
-
-    esp_bluedroid_disable();
-    esp_bluedroid_deinit();
-
-    esp_bt_controller_disable();
-    esp_bt_controller_deinit();
   }
 
   gptimer_disable(timer);
@@ -103,6 +88,7 @@ template <Type T> Play<T>::~Play() noexcept {
 }
 
 template <Type T> inline void Play<T>::loop() noexcept {
+
   volatile bool played{};
 
   String<GPIO_NUM_1, 0> string1(played);
@@ -118,13 +104,10 @@ template <Type T> inline void Play<T>::loop() noexcept {
   while (m_state == NeededState<T>::state) {
 
     if (played) {
-
       string1.check(val);
       string2.check(val);
       string3.check(val);
       string4.check(val);
-      string5.check(val);
-      string6.check(val);
     }
 
     {
@@ -149,8 +132,6 @@ template <Type T> inline void Play<T>::loop() noexcept {
           std::fwrite(reinterpret_cast<std::uint8_t *>(val), 1, sizeof(val),
                       stdout);
           std::fflush(stdout);
-
-        } else if constexpr (T == Type::Bluetooth) {
         }
 
         gptimer_set_raw_count(timer, 0);

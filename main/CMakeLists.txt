@@ -4,11 +4,11 @@ idf_component_register(
     INCLUDE_DIRS 
       "../include"
     REQUIRES 
+        esp_adc
         nvs_flash
         esp_wifi
         esp_netif
         freertos
-        bt
         esp_driver_gpio
         esp_driver_gptimer
         driver

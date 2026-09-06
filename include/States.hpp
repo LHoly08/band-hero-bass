@@ -9,7 +9,6 @@ enum class State : std::uint8_t {
   Config = 0,
   PlayingHub,
   PlayingSerial,
-  PlayingBluetooth,
 };
 
 } // namespace bh
