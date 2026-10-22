@@ -4,8 +4,10 @@
 #include <cstdint>
 #include <cstdio>
 
-#include "States.hpp"
 #include "Strings.hpp"
+#include "Utils.hpp"
+
+#include "esp_err.h"
 #include "esp_now.h"
 #include "esp_wifi.h"
 #include "freertos/idf_additions.h"
@@ -13,133 +15,145 @@
 #include "nvs_flash.h"
 
 #include "driver/gpio.h"
-#include "driver/gptimer.h"
 
 namespace bh {
 
-static constexpr std::uint8_t peerAddress[6] = {0x00, 0x11, 0x22,
-                                                0x33, 0x44, 0x55};
+namespace {
 
-enum class Type : std::uint8_t {
-  Hub = 0,
-  Serial,
+template <bh::State S>
+concept Playing = S == bh::State::PlayingHub || S == bh::State::PlayingSerial;
+
+template <bh::State S>
+  requires Playing<S>
+struct NeededReferences;
+
+template <> struct NeededReferences<bh::State::PlayingSerial> {
+  bh::AtomicState &state;
 };
 
-template <Type T> struct NeededState;
-
-template <> struct NeededState<Type::Hub> {
-  static constexpr State state = State::PlayingHub;
+template <> struct NeededReferences<bh::State::PlayingHub> {
+  bh::AtomicState &state;
+  const bh::MAC &macAddress;
 };
 
-template <> struct NeededState<Type::Serial> {
-  static constexpr State state = State::PlayingSerial;
-};
+} // namespace
 
-template <Type T> class Play {
+template <bh::State S>
+  requires Playing<S>
+class Play {
 public:
-  explicit Play(State &state) noexcept;
+  explicit Play(NeededReferences<S> neededReferences,
+                const bh::FretValues &fretValues) noexcept;
 
   ~Play() noexcept;
 
   inline void loop() noexcept;
 
 private:
-  State &m_state;
-  gptimer_handle_t timer = NULL;
+  static Play<S> *instance;
+
+  NeededReferences<S> m_references;
+  std::uint32_t m_note{};
+
+  bh::String<::GPIO_NUM_1, 0> m_string1;
+  bh::String<::GPIO_NUM_2, 1> m_string2;
+  bh::String<::GPIO_NUM_3, 2> m_string3;
+  bh::String<::GPIO_NUM_4, 3> m_string4;
 };
 
-template <Type T> Play<T>::Play(State &state) noexcept : m_state(state) {
-  gpio_install_isr_service(0);
+template <bh::State S>
+  requires Playing<S>
+Play<S> *Play<S>::instance = nullptr;
 
-  gptimer_config_t cfg;
+template <bh::State S>
+  requires Playing<S>
+Play<S>::Play(NeededReferences<S> neededReferences,
+              const bh::FretValues &fretValues) noexcept
+    : m_references(neededReferences), m_string1(fretValues), m_string2(fretValues),
+      m_string3(fretValues), m_string4(fretValues) {
 
-  cfg.clk_src = GPTIMER_CLK_SRC_DEFAULT;
-  cfg.direction = GPTIMER_COUNT_UP;
-  cfg.resolution_hz = 1 * 1000 * 1000;
+  ESP_ERROR_CHECK(::gpio_install_isr_service(ESP_INTR_FLAG_IRAM));
 
-  gptimer_new_timer(&cfg, &timer);
-  gptimer_enable(timer);
+  if constexpr (S == bh::State::PlayingHub) {
+    ::wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(::esp_wifi_init(&cfg));
+    ESP_ERROR_CHECK(::esp_wifi_set_mode(::WIFI_MODE_STA));
+    ESP_ERROR_CHECK(::esp_wifi_start());
 
-  if constexpr (T == Type::Hub) {
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    esp_wifi_init(&cfg);
-    esp_wifi_set_mode(WIFI_MODE_STA);
-    esp_wifi_start();
-
-    esp_now_init();
+    ESP_ERROR_CHECK(::esp_now_init());
   }
+  {
+    ::gpio_config_t cfg;
+
+    cfg.pin_bit_mask = 1ULL << bh::STATE_BUTTON_PIN;
+    cfg.mode = ::GPIO_MODE_INPUT;
+    cfg.pull_up_en = ::GPIO_PULLUP_DISABLE;
+    cfg.pull_down_en = ::GPIO_PULLDOWN_ENABLE;
+    cfg.intr_type = ::GPIO_INTR_POSEDGE;
+
+    ESP_ERROR_CHECK(::gpio_config(&cfg));
+  }
+
+  instance = this;
+
+  ESP_ERROR_CHECK(::gpio_isr_handler_add(
+      bh::STATE_BUTTON_PIN, bh::mode_button_pressed, &m_references.state));
 }
 
-template <Type T> Play<T>::~Play() noexcept {
+template <bh::State S>
+  requires Playing<S>
+Play<S>::~Play() noexcept {
+  (void)::esp_now_unregister_recv_cb();
+  (void)::esp_now_deinit();
 
-  if constexpr (T == Type::Hub) {
-
-    esp_now_deinit();
-
-    esp_wifi_stop();
-    esp_wifi_deinit();
+  if constexpr (S == bh::State::PlayingHub) {
+    (void)::esp_wifi_stop();
+    (void)::esp_wifi_deinit();
   }
 
-  gptimer_disable(timer);
+  ::gpio_isr_handler_remove(bh::STATE_BUTTON_PIN);
+  ::gpio_uninstall_isr_service();
 
-  gptimer_del_timer(timer);
-
-  gpio_uninstall_isr_service();
+  instance = nullptr;
 }
 
-template <Type T> inline void Play<T>::loop() noexcept {
+template <bh::State S>
+  requires Playing<S>
+inline void Play<S>::loop() noexcept {
 
-  volatile bool played{};
+  while (m_references.state.load(std::memory_order_relaxed) == S) {
 
-  String<GPIO_NUM_1, 0> string1(played);
-  String<GPIO_NUM_2, 1> string2(played);
-  String<GPIO_NUM_3, 2> string3(played);
-  String<GPIO_NUM_4, 3> string4(played);
+    std::uint32_t val = m_note;
 
-  std::uint32_t val{};
+    m_string1.check(val);
+    m_string2.check(val);
+    m_string3.check(val);
+    m_string4.check(val);
 
-  gptimer_start(timer);
-  gptimer_set_raw_count(timer, 0);
-
-  while (m_state == NeededState<T>::state) {
-
-    if (played) {
-      string1.check(val);
-      string2.check(val);
-      string3.check(val);
-      string4.check(val);
+    if (val == m_note) {
+      continue;
     }
 
-    {
-      std::uint64_t time{};
-      gptimer_get_captured_count(timer, &time);
+    if constexpr (S == bh::State::PlayingHub) {
 
-      if (time >= 1000) {
+      ::esp_err_t status = ::esp_now_send(
+          m_references.macAddress.data(),
+          reinterpret_cast<const std::uint8_t *>(&val), sizeof(val));
 
-        if constexpr (T == Type::Hub) {
+      for (unsigned char i{}; i < 4 && status != ESP_OK; ++i) {
 
-          esp_err_t status = esp_now_send(
-              peerAddress, reinterpret_cast<std::uint8_t *>(val), sizeof(val));
-
-          for (unsigned char i{}; i < 4 && status != ESP_OK; ++i) {
-
-            status =
-                esp_now_send(peerAddress, reinterpret_cast<std::uint8_t *>(val),
-                             sizeof(val));
-          }
-        } else if constexpr (T == Type::Serial) {
-
-          std::fwrite(reinterpret_cast<std::uint8_t *>(val), 1, sizeof(val),
-                      stdout);
-          std::fflush(stdout);
-        }
-
-        gptimer_set_raw_count(timer, 0);
+        status = ::esp_now_send(m_references.macAddress.data(),
+                                reinterpret_cast<const std::uint8_t *>(&val),
+                                sizeof(val));
       }
-    }
-  }
+    } else if constexpr (S == bh::State::PlayingSerial) {
 
-  gptimer_stop(timer);
+      std::fwrite(&val, 1, sizeof(val), stdout);
+      std::fflush(stdout);
+    }
+
+    m_note = val;
+  }
 }
 
 } // namespace bh
