@@ -7,13 +7,12 @@ for `-freflection` and `<meta>`.
 
 ## Build and flash
 
-From the repository root in an activated ESP-IDF shell, select the target for
-your board on a fresh checkout. The local development configuration uses
-ESP32-S3; CMake does not force a target, and `sdkconfig` is not tracked.
-For an ESP32-S3 board:
+From the repository root in an activated ESP-IDF shell, build with the checked-in
+`sdkconfig.defaults`: ESP32-S3, 2 MB flash, and the UART0 console. Local
+`sdkconfig` files are not tracked. For a different chip, select its target with
+`idf.py set-target` before building:
 
 ```sh
-idf.py set-target esp32s3
 idf.py -DMAC=001122334455 build
 ```
 
