@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdio>
 
+#include "PeerConfig.hpp"
 #include "Strings.hpp"
 #include "Utils.hpp"
 
@@ -12,7 +13,6 @@
 #include "esp_wifi.h"
 #include "freertos/idf_additions.h"
 #include "freertos/task.h"
-#include "nvs_flash.h"
 
 #include "driver/gpio.h"
 
@@ -33,7 +33,7 @@ template <> struct NeededReferences<bh::State::PlayingSerial> {
 
 template <> struct NeededReferences<bh::State::PlayingHub> {
   bh::AtomicState &state;
-  const bh::MAC &macAddress;
+  bh::PeerConfig &peerConfig;
 };
 
 } // namespace
@@ -55,10 +55,7 @@ private:
   NeededReferences<S> m_references;
   std::uint32_t m_note{};
 
-  bh::String<::GPIO_NUM_1, 0> m_string1;
-  bh::String<::GPIO_NUM_2, 1> m_string2;
-  bh::String<::GPIO_NUM_3, 2> m_string3;
-  bh::String<::GPIO_NUM_4, 3> m_string4;
+  bh::StringMembers m_strings;
 };
 
 template <bh::State S>
@@ -69,8 +66,7 @@ template <bh::State S>
   requires Playing<S>
 Play<S>::Play(NeededReferences<S> neededReferences,
               const bh::FretValues &fretValues) noexcept
-    : m_references(neededReferences), m_string1(fretValues), m_string2(fretValues),
-      m_string3(fretValues), m_string4(fretValues) {
+    : m_references(neededReferences), m_strings(fretValues) {
 
   ESP_ERROR_CHECK(::gpio_install_isr_service(ESP_INTR_FLAG_IRAM));
 
@@ -81,6 +77,7 @@ Play<S>::Play(NeededReferences<S> neededReferences,
     ESP_ERROR_CHECK(::esp_wifi_start());
 
     ESP_ERROR_CHECK(::esp_now_init());
+    m_references.peerConfig.registerPeer();
   }
   {
     ::gpio_config_t cfg;
@@ -123,12 +120,13 @@ inline void Play<S>::loop() noexcept {
 
   while (m_references.state.load(std::memory_order_relaxed) == S) {
 
+    if constexpr (S == bh::State::PlayingHub) {
+      m_references.peerConfig.poll(true);
+    }
+
     std::uint32_t val = m_note;
 
-    m_string1.check(val);
-    m_string2.check(val);
-    m_string3.check(val);
-    m_string4.check(val);
+    m_strings.play(val);
 
     if (val == m_note) {
       continue;
@@ -136,16 +134,10 @@ inline void Play<S>::loop() noexcept {
 
     if constexpr (S == bh::State::PlayingHub) {
 
-      ::esp_err_t status = ::esp_now_send(
-          m_references.macAddress.data(),
-          reinterpret_cast<const std::uint8_t *>(&val), sizeof(val));
+      (void)::esp_now_send(m_references.peerConfig.address().data(),
+                           reinterpret_cast<const std::uint8_t *>(&val),
+                           sizeof(val));
 
-      for (unsigned char i{}; i < 4 && status != ESP_OK; ++i) {
-
-        status = ::esp_now_send(m_references.macAddress.data(),
-                                reinterpret_cast<const std::uint8_t *>(&val),
-                                sizeof(val));
-      }
     } else if constexpr (S == bh::State::PlayingSerial) {
 
       std::fwrite(&val, 1, sizeof(val), stdout);

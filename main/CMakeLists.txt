@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "main.cpp" "Utils.cpp"
+    SRCS "main.cpp" "Utils.cpp" "PeerConfig.cpp"
     INCLUDE_DIRS 
       "../include"
     REQUIRES 
@@ -22,3 +22,6 @@ endif()
 target_compile_definitions(${COMPONENT_LIB} PRIVATE BH_MAC=0x${MAC}ULL)
 
 target_compile_features(${COMPONENT_LIB} PRIVATE cxx_std_26)
+target_compile_options(${COMPONENT_LIB} PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:-freflection>
+)

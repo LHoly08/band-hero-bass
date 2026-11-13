@@ -3,7 +3,12 @@
 
 #include <array>
 #include <cstdint>
+#include <meta>
 #include <numeric>
+#include <ranges>
+#include <string>
+#include <type_traits>
+#include <vector>
 
 #include "Utils.hpp"
 #include "driver/gpio.h"
@@ -62,6 +67,7 @@ public:
       const auto &fretVal = m_fretValues[i];
       if (fretVal - threshold <= val && val <= fretVal + threshold) {
         note |= i << (2 + (N * 5));
+        break;
       }
     }
   }
@@ -86,6 +92,60 @@ String<PIN, N>::String(const std::array<std::uint16_t, 24> &fretValues) noexcept
 
   ::gpio_config(&cfg);
 }
+
+inline auto StringsClass() {
+  class Strings;
+
+  consteval {
+    static constexpr auto GPIOS =
+        std::array{::GPIO_NUM_1, ::GPIO_NUM_2, ::GPIO_NUM_3, ::GPIO_NUM_4};
+    std::vector<std::meta::info> members;
+
+    template for (constexpr auto i :
+                  std::define_static_array(std::ranges::views::iota(
+                      0, static_cast<int>(GPIOS.size())))) {
+      constexpr gpio_num_t gpio = GPIOS[i];
+      std::string name = "string";
+      name.push_back(static_cast<char>('1' + i));
+      members.push_back(
+          std::meta::data_member_spec(^^String<gpio, i>, {
+                                                             .name = name}));
+    }
+    std::meta::define_aggregate(^^Strings, members);
+  }
+
+  class StringMethod : protected Strings {
+  private:
+    static Strings makeStrings(const bh::FretValues &fretValues) {
+      return [](const auto &initial_value) {
+        constexpr auto [... members] =
+        [:std::meta::reflect_constant_array(
+              std::meta::nonstatic_data_members_of(
+                  ^^Strings, std::meta::access_context::current())):];
+
+        return Strings{
+            typename[:std::meta::type_of(members):]{initial_value}...};
+      }(fretValues);
+    }
+
+  public:
+    explicit StringMethod(const bh::FretValues &fretValues) noexcept
+        : Strings(makeStrings(fretValues)) {}
+
+    inline void play(std::uint32_t &val) noexcept {
+      template for (constexpr auto member : std::define_static_array(
+                        std::meta::nonstatic_data_members_of(
+                            ^^Strings, std::meta::access_context::current()))) {
+        this->[:member:].check(val);
+      }
+    }
+  };
+
+  // Expose the generated type without constructing hardware or needing frets.
+  return std::type_identity<StringMethod>{};
+}
+
+using StringMembers = decltype(StringsClass())::type;
 
 } // namespace bh
 

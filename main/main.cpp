@@ -1,6 +1,7 @@
 #include <array>
 #include <cstdint>
 
+#include "PeerConfig.hpp"
 #include "Playing.hpp"
 #include "Utils.hpp"
 
@@ -12,14 +13,14 @@
 extern "C" void app_main() {
   constexpr std::uint64_t macAddressComptime = BH_MAC;
 
-  bh::AtomicState state{bh::State::PlayingHub};
-  bh::MAC macAddress{
-      static_cast<std::uint8_t>(macAddressComptime >> (8 * 5)),
-      static_cast<std::uint8_t>(macAddressComptime >> (8 * 4)),
-      static_cast<std::uint8_t>(macAddressComptime >> (8 * 3)),
-      static_cast<std::uint8_t>(macAddressComptime >> (8 * 2)),
-      static_cast<std::uint8_t>(macAddressComptime >> (8 * 1)),
-      static_cast<std::uint8_t>(macAddressComptime >> (8 * 0))};
+  bh::AtomicState state{bh::State::Config};
+  bh::MAC macAddress{static_cast<std::uint8_t>(macAddressComptime >> (8 * 5)),
+                     static_cast<std::uint8_t>(macAddressComptime >> (8 * 4)),
+                     static_cast<std::uint8_t>(macAddressComptime >> (8 * 3)),
+                     static_cast<std::uint8_t>(macAddressComptime >> (8 * 2)),
+                     static_cast<std::uint8_t>(macAddressComptime >> (8 * 1)),
+                     static_cast<std::uint8_t>(macAddressComptime >> (8 * 0))};
+  bh::PeerConfig peerConfig(macAddress);
 
   bh::FretValues fretValues{};
 
@@ -29,11 +30,13 @@ infinite_loop: {
 
   switch (state.load(std::memory_order_relaxed)) {
   case bh::State::Config: {
+    peerConfig.poll();
+    ::vTaskDelay(pdMS_TO_TICKS(10) + 1);
     break;
   }
   case bh::State::PlayingHub: {
     bh::Play<bh::State::PlayingHub> play(
-        {.state = state, .macAddress = macAddress}, fretValues);
+        {.state = state, .peerConfig = peerConfig}, fretValues);
     play.loop();
 
     break;
@@ -41,6 +44,7 @@ infinite_loop: {
   case bh::State::PlayingSerial: {
     bh::Play<bh::State::PlayingSerial> play({.state = state}, fretValues);
     play.loop();
+
     break;
   }
   }
